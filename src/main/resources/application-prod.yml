@@ -1,0 +1,18 @@
+spring:
+  #这里注意，在prod配置中，datasource被错误地放在了application节点下，
+  #正确的路径应该是spring.datasource.druid，而不是spring.application.datasource.druid。
+  #这是因为用户在复制配置时，误将datasource放在了application的子节点下，
+  #导致prod的数据库配置没有被正确加载，因此应用仍然使用默认的本地配置
+  #注意层级关系！！！
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      url: jdbc:mysql://120.27.202.191:3306/user_center
+      username: dmsTest
+      password: Ecs@123456
+      driver-class-name: com.mysql.cj.jdbc.Driver
+  session:
+    timeout: 86400 #设置session失效时间
+#spring boot默认访问ipv6，需要改为ipv4
+server:
+  address: 0.0.0.0
