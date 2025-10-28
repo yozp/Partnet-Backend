@@ -5,6 +5,7 @@ import com.yzj.partnetBackend.common.ErrorCode;
 import com.yzj.partnetBackend.common.ResultUtils;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -18,7 +19,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * 这样我们控制层的返回值就使用BusinessException类的构造器即可
  * 如：throw new BusinessException(ErrorCode.PARAMS_ERROR)
  */
-@RestControllerAdvice
+//@ControllerAdvice 代表当前类的异常处理controller
+@RestControllerAdvice//@RestControllerAdvice = @ControllerAdvice + @ResponseBody
 @Slf4j
 @Hidden//这个注解很关键，不加则knife文档打不开！！！
 public class GlobalExceptionHandler {

@@ -185,6 +185,14 @@
             <version>3.4.2</version>
         </dependency>
 
+        <!--Redisson 是一个 java 操作 Redis 的客户端，提供了大量的分布式数据集来简化对 Redis 的操作和使用，
+        可以让开发者像使用本地集合一样使用 Redis，完全感知不到 Redis 的存在-->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>3.19.1</version>
+        </dependency>
+
     </dependencies>
 
     <build>

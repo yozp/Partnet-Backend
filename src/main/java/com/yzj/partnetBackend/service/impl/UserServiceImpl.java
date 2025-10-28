@@ -10,16 +10,17 @@ import com.yzj.partnetBackend.exception.BusinessException;
 import com.yzj.partnetBackend.model.User;
 import com.yzj.partnetBackend.service.UserService;
 import com.yzj.partnetBackend.mapper.UserMapper;
+import com.yzj.partnetBackend.utlis.AlgorithmUtils;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.math3.util.Pair;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.DigestUtils;
 
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -180,6 +181,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         safetyUser.setUsername(originUser.getUsername());
         safetyUser.setUserAccount(originUser.getUserAccount());
         safetyUser.setAvatarUrl(originUser.getAvatarUrl());
+        safetyUser.setProfile(originUser.getProfile());
         safetyUser.setGender(originUser.getGender());
         safetyUser.setPhone(originUser.getPhone());
         safetyUser.setEmail(originUser.getEmail());
@@ -314,6 +316,121 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     public boolean isAdmin(User loginUser) {
         return loginUser!=null && loginUser.getUserRole()==ADMIN_ROLE;
     }
+
+    /**
+     * 推荐匹配用户（还不是很理解）
+     * @param num
+     * @param loginUser
+     * @return
+     */
+    @Override
+    public List<User> matchUsers(long num, User loginUser) {
+        //先排除标签为空的用户，减少匹配时间
+        QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+        queryWrapper.isNotNull("tags");
+        queryWrapper.select("id","tags");//仅查询id和tags字段，减少数据传输量
+        List<User> userList = this.list(queryWrapper);
+        //List<User> userList = this.page(new Page<>(pageNum,pageSize),queryWrapper);
+
+        //logininUser.getTags()：获取当前用户的标签（JSON 字符串格式）
+        String tags = loginUser.getTags();
+        Gson gson = new Gson();
+        //将 JSON 字符串转换为 List<String>
+        //gson.fromJson()实现从Json相关对象到Java实体的方法,提供两个参数，分别是json字符串以及需要转换对象的类型
+        //TypeToken，它是gson提供的数据类型转换器，可以支持各种数据集合类型转换
+        List<String> tagList = gson.fromJson(tags, new TypeToken<List<String>>() {
+        }.getType());
+        // 用户列表的下表 => 相似度'
+        //Pair是一种简单的数据结构，用于存储两个元素作为一对
+        //存储用户及其与当前用户的相似度（编辑距离）
+        List<Pair<User,Long>> list = new ArrayList<>();
+        // 依次计算当前用户和所有用户的相似度
+        for (int i = 0; i <userList.size(); i++) {
+            User user = userList.get(i);
+            String userTags = user.getTags();
+            //无标签的跳过,同时跳过自己
+            if (StringUtils.isBlank(userTags) || user.getId() == loginUser.getId()){
+                continue;
+            }
+            List<String> userTagList = gson.fromJson(userTags, new TypeToken<List<String>>() {
+            }.getType());
+            //计算分数
+            long distance = AlgorithmUtils.minDistance(tagList, userTagList);
+            list.add(new Pair<>(user,distance));
+        }
+        //按编辑距离有小到大排序
+        //sorted(): 按编辑距离升序排序（相似度降序）。
+        //limit(num): 限制结果数量。
+        //collect(Collectors.toList()): 将流转换为列表
+        List<Pair<User, Long>> topUserPairList = list.stream()
+                .sorted((a, b) -> (int) (a.getValue() - b.getValue()))
+                .limit(num)
+                .collect(Collectors.toList());
+        //有顺序的userID列表
+        List<Long> userListVo = topUserPairList.stream().map(pari -> pari.getKey().getId()).collect(Collectors.toList());
+
+        //根据id查询user完整信息
+        QueryWrapper<User> userQueryWrapper = new QueryWrapper<>();
+        userQueryWrapper.in("id",userListVo);
+        Map<Long, List<User>> userIdUserListMap = this.list(userQueryWrapper).stream()
+                .map(user -> getSafetyUser(user))
+                .collect(Collectors.groupingBy(User::getId));//按用户ID分组，生成Map<Long, List<User>>
+
+        // 因为上面查询打乱了顺序，这里根据上面有序的userID列表赋值
+        List<User> finalUserList = new ArrayList<>();
+        for (Long userId : userListVo){
+            finalUserList.add(userIdUserListMap.get(userId).get(0));
+        }
+        return finalUserList;
+    }
+
+
+//    @Override
+//    public List<User> matchUsers(long num, User logininUser) {
+//        //List<User>：动态数组，存储用户列表
+//        List<User> userList = this.list();
+//        //logininUser.getTags()：获取当前用户的标签（JSON 字符串格式）
+//        String tags = logininUser.getTags();
+//        Gson gson = new Gson();
+//        //将 JSON 字符串转换为 List<String>
+//        //gson.fromJson()实现从Json相关对象到Java实体的方法,提供两个参数，分别是json字符串以及需要转换对象的类型
+//        //TypeToken，它是gson提供的数据类型转换器，可以支持各种数据集合类型转换
+//        List<String> tagList = gson.fromJson(tags, new TypeToken<List<String>>() {
+//        }.getType());
+//        System.out.println(tagList);
+//        // 用户列表的下表 => 相似度
+//        //SortedMap（实现类 TreeMap）：按键自然排序的映射表，此处 key 为用户索引，value 为相似度
+//        SortedMap<Integer, Long> indexDistanceMap = new TreeMap<>();
+//        for (int i = 0; i <userList.size(); i++) {
+//            User user = userList.get(i);
+//            String userTags = user.getTags();
+//            //无标签的跳过
+//            if (StringUtils.isBlank(userTags)){
+//                continue;
+//            }
+//            List<String> userTagList = gson.fromJson(userTags, new TypeToken<List<String>>() {
+//            }.getType());
+//            //计算分数
+//            long distance = AlgorithmUtils.minDistance(tagList, userTagList);
+//            indexDistanceMap.put(i,distance);
+//            //list.add(new Pair<>(user,distance));
+//        }
+//        //下面这个是打印前num个的id和分数
+//        List<User> userListVo = new ArrayList<>();
+//        int i = 0;
+//        //entrySet 方法返回 Map 中所有键值对的集合。每一个元素都是一个 Map.Entry 对象，其中包含一个 key 和一个 value
+//        for (Map.Entry<Integer,Long> entry : indexDistanceMap.entrySet()){
+//            //超过当前需要查找的人数（num），就结束循环
+//            if (i > num){
+//                break;
+//            }
+//            User user = userList.get(entry.getKey());
+//            System.out.println(user.getId() + ":" + entry.getKey() + ":" + entry.getValue());
+//            userListVo.add(user);
+//            i++;
+//        }
+//        return userListVo;
+//    }
 
 }
 

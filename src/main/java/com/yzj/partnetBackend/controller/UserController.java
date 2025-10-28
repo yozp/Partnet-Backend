@@ -1,6 +1,7 @@
 package com.yzj.partnetBackend.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yzj.partnetBackend.common.BaseResponse;
 import com.yzj.partnetBackend.common.ErrorCode;
 import com.yzj.partnetBackend.common.ResultUtils;
@@ -13,24 +14,35 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static com.yzj.partnetBackend.constant.UserConstant.ADMIN_ROLE;
 import static com.yzj.partnetBackend.constant.UserConstant.USER_LOGIN_STATE;
 
-@RestController
+@RestController// @RestController = @Controller + @ResponseBody
 @RequestMapping("/user")
 //这个@CrossOrigin已经够用了，这个WebMvcConfig.java可以不需要，内容是没有错的
-@CrossOrigin(origins = {"http://localhost:3000/"},allowCredentials = "true")
+@CrossOrigin(origins = {"http://localhost:3000/",
+        "http://localhost:5173/",
+        "http://partnet-frontend.user-center-yzj.top",
+        "https://partnet-frontend.user-center-yzj.top"},
+        allowCredentials = "true")@Slf4j
 public class UserController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private RedisTemplate redisTemplate;
 
     /**
      * 用户注册
@@ -86,6 +98,8 @@ public class UserController {
         //return new BaseResponse<>(0,user,"ok");
         return ResultUtils.success(user);
     }
+
+    //--------------------------------------------------------------------------------------------------
 
     /**
      * 查询用户(管理员权限)
@@ -204,6 +218,80 @@ public class UserController {
         int result=userService.userUpdate(user,loginUser);
 
         return ResultUtils.success(result);
+    }
+
+//    /**
+//     * 查询用户列表
+//     * @param request
+//     * @return
+//     */
+//    @GetMapping("/recommend")
+//    public BaseResponse<List<User>> recommendUsers(HttpServletRequest request){
+//        //这里queryWrapper什么都不写表示查询所有
+//        QueryWrapper<User> queryWrapper=new QueryWrapper<>();
+//        List<User> userList=userService.list(queryWrapper);
+//        List<User> list=userList.stream().map(user -> userService.getSafetyUser(user)).collect(Collectors.toList());
+//        return ResultUtils.success(list);
+//    }
+
+    /**
+     * 分页查询用户列表（主页推荐列表）
+     * 使用缓存！！！
+     * @param request
+     * @return
+     */
+    @GetMapping("/recommend")
+    public BaseResponse<Page<User>> recommendUsers(long pageSize, long pageNum, HttpServletRequest request){
+
+        User logininUser=userService.getLogininUser(request);
+        //String.format这里表示将后面的参数放到前面的%s里面，是字符串的一种格式化，%s表示一个转换符
+        //设计缓存key：yzj:user:recommend:
+        String redisKey=String.format("yzj:user:recommend:%s",logininUser.getId());
+
+//        redisTemplate.opsForValue();//操作字符串
+//        redisTemplate.opsForHash();//操作hash
+//        redisTemplate.opsForList();//操作list
+//        redisTemplate.opsForSet();//操作set
+//        redisTemplate.opsForZSet();//操作有序set
+
+        ValueOperations valueOperations=redisTemplate.opsForValue();//操作字符串
+
+        //如果有缓存，直接读取
+        Page<User> userPage=(Page<User>) valueOperations.get(redisKey);
+        if(userPage!=null){
+            return ResultUtils.success(userPage);
+        }
+
+        //无缓存，则查询数据库
+        //这里queryWrapper什么都不写表示查询所有
+        QueryWrapper<User> queryWrapper=new QueryWrapper<>();
+        //分页查询
+        userPage=userService.page(new Page<>(pageNum,pageSize),queryWrapper);
+        //同时写缓存，10s过期
+        try{
+            //设置的是30000秒失效，30000秒之内查询有结果，30000秒之后返回为null，主要是对接数据库更新
+            valueOperations.set(redisKey,userPage,30000, TimeUnit.MICROSECONDS);
+        }catch(Exception e){
+            log.error("redis set key error",e);//需要@Slf4j注解
+        }
+
+        return ResultUtils.success(userPage);
+    }
+
+    /**
+     * 获取最匹配的用户
+     * @param num
+     * @param request
+     * @return
+     */
+    @GetMapping("/match")
+    public BaseResponse<List<User>> matchUsers(long num,HttpServletRequest request){
+        ///规范查询的条数，否则会窃取整个数据库
+        if(num<=0||num>20){
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        User logininUser = userService.getLogininUser(request);
+        return ResultUtils.success(userService.matchUsers(num,logininUser));
     }
 
 //    //这个方法现在封装在server层

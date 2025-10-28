@@ -15,7 +15,7 @@ import lombok.Data;
 @Data
 //这里必须加上implements Serializable 进行序列化，否则不能使用redis分布式登录
 public class User implements Serializable {
-    @TableId
+    @TableId(type = IdType.AUTO)
     private long id;
 
     private String username;
